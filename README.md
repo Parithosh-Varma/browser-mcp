@@ -1,145 +1,39 @@
-<div align="center">
+<p align="center">
+  <img src="extension/icon128.png" alt="browser-mcp" width="120" height="120">
+</p>
 
-<img src="extension/icon128.png" alt="browser-mcp logo" width="128" height="128">
+<h1 align="center">browser-mcp</h1>
 
-# browser-mcp
+<p align="center">
+  <b>Your AI assistant, driving your real browser.</b><br>
+  An MCP server that gives AI agents mouse-and-keyboard control over a live Chrome session.
+</p>
 
-[![Node.js Version](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![MCP SDK](https://img.shields.io/badge/MCP-SDK%20v1.0-black)](https://github.com/modelcontextprotocol/typescript-sdk)
+<p align="center">
+  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js-%3E%3D18-brightgreen?style=flat-square" alt="Node.js version"></a>
+  <a href="https://github.com/modelcontextprotocol"><img src="https://img.shields.io/badge/MCP-SDK%20v1.0-3f51b5?style=flat-square" alt="MCP SDK"></a>
+  <a href="https://github.com/Parithosh-Varma/browser-mcp/blob/main/README.md"><img src="https://img.shields.io/badge/Chrome-MV3%20extension-4285F4?style=flat-square" alt="Chrome Extension"></a>
+  <a href="https://github.com/Parithosh-Varma/browser-mcp/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License"></a>
+</p>
 
-A Model Context Protocol (MCP) server that provides AI assistants with direct, real-time control over a Google Chrome browser instance. Through a lightweight Chrome extension, the server drives live browser sessions — navigation, interaction, inspection, and capture — exposing them to any MCP-compatible client (Claude, opencode, and others) as a clean, typed tool interface.
+<p align="center">
+  [Quick start](#quick-start) · [Tools](#tools) · [Architecture](#architecture) · [Config](#configuration) · [Testing](#testing)
+</p>
 
-</div>
+**browser-mcp** is a [Model Context Protocol](https://modelcontextprotocol.io) server that extends any MCP-capable client — Claude, opencode, and friends — with full control over a real Google Chrome window. Through a tiny Chrome extension, the agent navigates pages, clicks, types, screenshots, and inspects the live DOM of a session that already has your logins, cookies, and extensions loaded.
 
-## Table of Contents
-
-- [Overview](#overview)
-- [Architecture](#architecture)
-- [Tools](#tools)
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Usage](#usage)
-  - [1. Load the Extension](#1-load-the-extension)
-  - [2. Start the Server](#2-start-the-server)
-  - [3. Connect an MCP Client](#3-connect-an-mcp-client)
-- [Testing](#testing)
-- [Project Structure](#project-structure)
-- [License](#license)
-
-## Overview
-
-`browser-mcp` is designed for AI-driven browser automation that must operate on a *real* user session — preserving login state, cookies, and visible windows — rather than an isolated headless environment. Key characteristics:
-
-- **Real browser control**: The controlled tab is a live Chrome window on the user's desktop. The agent interacts with it exactly as a human would, with full access to existing sessions and extensions.
-- **Standards-based**: Implements the Model Context Protocol over stdio using the official [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk).
-- **CDP-powered**: The extension drives the tab via the Chrome DevTools Protocol (`chrome.debugger` API), enabling accurate accessibility snapshots, console observation, and screenshots without a browser driver dependency.
-- **Minimal footprint**: No Playwright browser downloads or separate driver processes are required to operate; Playwright is used only in the test harness.
-
-## Architecture
-
-```
-┌─────────────────────┐    stdio (JSON-RPC)    ┌──────────────────────────┐    WebSocket 127.0.0.1:9333    ┌────────────────────────┐
-│                     │ ─────────────────────▶ │                          │ ────────────────────────────▶ │                        │
-│  MCP client         │                        │  server.js               │                                │  Chrome extension      │
-│  (Claude, opencode, │                        │  ├─ MCP tool definitions │                                │  (MV3 service worker)  │
-│  any MCP host)      │                        │  └─ WebSocket bridge     │ ◀────────────────────────────  │  ├─ chrome.debugger     │
-│                     │ ◀───────────────────── │                          │                                │  └─ tab automation     │
-└─────────────────────┘                        └──────────────────────────┘                                └────────────────────────┘
-```
-
-The system comprises three components:
-
-1. **MCP server** (`server.js`) — Registers the browser tool set and serves it over stdio. An embedded WebSocket server bridges tool invocations to the extension.
-2. **WebSocket bridge** — A localhost-only listener (`127.0.0.1:9333`) that multiplexes request/response messages between the MCP server and the extension, with per-call timeouts and reconnection handling.
-3. **Chrome extension** (`extension/`) — An MV3 extension that connects to the bridge, attaches to a tab via CDP, executes requested actions, and returns accessibility-tree snapshots, screenshots, and console logs.
-
-This three-tier design keeps the MCP interface standard while isolating all browser-specific machinery inside the extension, making the server portable and the transport auditable.
-
-## Tools
-
-The server exposes the following tools:
-
-| Tool | Description |
-|---|---|
-| `browser_navigate` | Opens a URL in the controlled tab and returns the updated page snapshot |
-| `browser_snapshot` | Returns the accessibility tree of the current page with element `ref` identifiers |
-| `browser_click` | Clicks an element identified by its `ref` |
-| `browser_type` | Types text into a textbox or textarea; optionally submits with Enter |
-| `browser_select_option` | Selects one or more options in a dropdown |
-| `browser_press_key` | Dispatches keyboard input (Enter, Escape, ArrowDown, Tab, Meta+K, …) |
-| `browser_hover` | Moves the cursor over an element, e.g. to reveal hover menus |
-| `browser_wait` | Waits a specified number of seconds for transitions or animations |
-| `browser_back` | Navigates backward in history |
-| `browser_forward` | Navigates forward in history |
-| `browser_screenshot` | Captures a PNG screenshot of the current page |
-| `browser_get_console_logs` | Retrieves console messages and page errors logged since the last call |
-| `browser_close` | Closes the controlled tab and detaches the debugger |
-
-Interaction tools (`browser_click`, `browser_type`, and others) require a `ref` obtained from `browser_snapshot`; callers should refresh the snapshot after each interaction, as refs are re-generated.
-
-## Requirements
-
-| Component | Requirement |
-|---|---|
-| Node.js | ≥ 18 |
-| Browser | Google Chrome (or Chromium) — MV3 extension support required |
-| OS | macOS (fully supported, including automatic multi-display targeting); other platforms fall back to the primary display |
-| MCP client | Any host that supports external MCP servers over stdio |
-
-## Installation
+## Quick start
 
 ```bash
-npm install
+npm install          # 1. install dependencies
+npm start            # 2. launch the MCP server (WebSocket bridge on ws://127.0.0.1:9333)
 ```
 
-## Configuration
+Then load the extension:
 
-Command-line flags for `server.js`:
-
-| Flag | Default | Description |
-|---|---|---|
-| `--port <n>` | `9333` | Port for the WebSocket extension bridge (must match the extension's configured endpoint) |
-| `--display <n>` | `1` | Physical display to target, 1-based. Prefers secondary displays on macOS when available |
-| `--debug` | off | Enables verbose debug logging on stderr |
-
-Example:
-
-```bash
-node server.js --port 9333 --display 2 --debug
-```
-
-The debug log prints bridge status, connection events, and per-tool diagnostics to stderr. Standard JSON-RPC traffic is emitted on stdout.
-
-## Usage
-
-### 1. Load the Extension
-
-1. Open `chrome://extensions` in Chrome.
-2. Enable **Developer mode** (toggle in the top-right corner).
-3. Click **Load unpacked** and select the `extension/` directory of this repository.
-4. Optionally pin the **browser-mcp controller** extension to the toolbar for quick status inspection.
-
-### 2. Start the Server
-
-```bash
-npm start
-```
-
-Expected output on stderr:
-
-```
-[browser-mcp] extension bridge listening on ws://127.0.0.1:9333
-[browser-mcp] extension connected
-[browser-mcp] targeting display 1 of 2 at x=1920 y=0 1920x1080
-```
-
-The extension connects automatically and reconnects on interruption, so the server can be restarted independently of Chrome.
-
-### 3. Connect an MCP Client
-
-Register the server in your MCP client's configuration. Example for Claude Code / opencode:
+1. Open `chrome://extensions` in Chrome and enable **Developer mode**.
+2. Click **Load unpacked** and select the `extension/` folder from this repo.
+3. Point your MCP client at the server:
 
 ```json
 {
@@ -152,40 +46,100 @@ Register the server in your MCP client's configuration. Example for Claude Code 
 }
 ```
 
-Once connected, the client can invoke the tool set, e.g.:
+That's it. The extension auto-connects to the bridge — no headless browser, no driver process, no screenshots-of-a-screenshot. Your AI operates the very Chrome window on your desk.
 
-1. `browser_navigate` with a target URL.
-2. `browser_snapshot` to obtain element refs.
-3. `browser_click` / `browser_type` on the desired refs.
-4. `browser_screenshot` to verify state visually.
+## Tools
+
+| Tool | Does what |
+|---|---|
+| `browser_navigate` | Open a URL in the controlled tab, returns the page snapshot |
+| `browser_snapshot` | Accessibility tree of the page, every element tagged with a `ref` |
+| `browser_click` | Click an element by `ref` |
+| `browser_type` | Type into a textbox / textarea, optionally press Enter |
+| `browser_select_option` | Pick values from a dropdown |
+| `browser_press_key` | Send keys: `Enter`, `Escape`, `ArrowDown`, `Tab`, `Meta+K`, … |
+| `browser_hover` | Hover an element (reveal hover menus) |
+| `browser_wait` | Pause N seconds for transitions and animations |
+| `browser_back` / `browser_forward` | History navigation |
+| `browser_screenshot` | Grab a PNG of the page |
+| `browser_get_console_logs` | Console messages and page errors since the last call |
+| `browser_close` | Close the controlled tab and detach |
+
+Interaction tools take a `ref` from the latest `browser_snapshot` — so a typical agent loop is: **snapshot → act → snapshot → act**, exactly like a human looking at the page.
+
+## How it works
+
+```
+                 stdio (JSON-RPC)               WebSocket 127.0.0.1:9333
+  MCP client   ─────────────────▶  server.js  ─────────────────────────▶  Chrome
+  (Claude,     ◀─────────────────  MCP tools    ◀────────────────────────  extension
+   opencode…)       results           │ bridge                              │
+                                     └──────────── 1. CDP (chrome.debugger) ─┘
+                                                  2. accessibility snapshot
+```
+
+Three moving parts, one goal:
+
+1. **`server.js`** — the MCP server. Exposes the 13 tools over stdio to any MCP client and runs an embedded WebSocket bridge for talking to the extension.
+2. **The bridge** — a localhost-only listener on `127.0.0.1:9333` that multiplexes requests/responses, with per-call timeouts and automatic reconnection.
+3. **The extension** (`extension/`) — an MV3 service worker connected to the bridge. It drives the active tab over the Chrome DevTools Protocol (`chrome.debugger`), renders accessibility snapshots, and reports console output back.
+
+Because the browser machinery lives entirely in the extension, the MCP surface stays clean and standard — and because the extension keeps your real session, the agent gets your real state.
+
+## Features
+
+- **Controls the browser session you're already logged into** — cookies, extensions, and multi-account setups just work.
+- **Compact accessibility snapshots** — role, name, value, checked-state, and a stable `ref` for every interactive element.
+- **full console insight** — `browser_get_console_logs` surfaces `console.log`, warnings, and page errors, which is a huge debugging superpower.
+- **Multi-display aware** — on macOS the server auto-detects your displays and targets your chosen window position (usable on Linux/Windows too, just with primary-display default).
+- **Zero browser-driver setup** — no Playwright binary downloads or `npx playwright install` to run the server; Playwright is used only in the test harness.
+- **Standards-first** — built on the official MCP TypeScript SDK with Zod-validated inputs.
+
+## Configuration
+
+Flags for `server.js`:
+
+| Flag | Default | Description |
+|---|---|---|
+| `--port <n>` | `9333` | WebSocket bridge port (must match the extension's endpoint) |
+| `--display <n>` | `1` | Physical display to target (1-based, prefers secondary displays on macOS) |
+| `--debug` | off | Verbose diagnostics on stderr |
+
+```bash
+node server.js --port 9333 --display 2 --debug
+```
+
+Debug mode prints bridge status, connection events, and per-tool diagnostics to stderr; JSON-RPC traffic flows on stdout.
+
+## Requirements
+
+| Component | Requirement |
+|---|---|
+| Node.js | ≥ 18 |
+| Browser | Google Chrome / Chromium (MV3 extension support) |
+| OS | macOS fully supported (auto multi-display targeting); others fall back to the primary display |
+| MCP client | Any host running external MCP servers over stdio |
 
 ## Testing
 
-A scripted stdio client that exercises the full tool flow:
-
 ```bash
-node test-client.mjs
+node test-client.mjs   # scripted stdio client exercising the full tool flow
+node e2e.mjs            # Playwright-launched Chrome with the extension pre-loaded
 ```
 
-An end-to-end test that launches a Playwright-controlled Chrome instance with the extension pre-loaded:
-
-```bash
-node e2e.mjs
-```
-
-## Project Structure
+## Project structure
 
 ```
 browser-mcp/
-├── server.js              # MCP server, tool definitions, WebSocket bridge
-├── extension/             # Chrome MV3 extension (CDP-based tab automation)
-│   ├── manifest.json      # Extension manifest (permissions, service worker)
-│   ├── background.js      # CDP attach, snapshot rendering, tool execution
-│   ├── popup.html         # Status popup UI
-│   ├── popup.js           # Popup logic
-│   └── icons/             # Extension icons (16/32/48/128)
-├── test-client.mjs        # MCP stdio smoke test
-├── e2e.mjs                # End-to-end test with Playwright
+├── server.js           # MCP server, tool definitions, WebSocket bridge
+├── extension/          # Chrome MV3 extension (CDP-based tab automation)
+│   ├── manifest.json   # extension manifest (permissions, service worker)
+│   ├── background.js   # CDP attach, snapshot rendering, tool execution
+│   ├── popup.html/.js  # status popup
+│   ├── icons/          # 16/32/48/128 px
+│   └── …
+├── test-client.mjs     # MCP stdio smoke test
+├── e2e.mjs             # end-to-end test with Playwright
 ├── package.json
 └── README.md
 ```
